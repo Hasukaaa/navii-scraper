@@ -35,8 +35,6 @@ navii-scraper/
 ├── run.py                      # 実行エントリポイント
 ├── requirements.txt            # 依存パッケージ
 └── setup.sh                    # セットアップスクリプト
-
-※ pharmacy_scraper_enhanced.py と pharmacy_scraper_original.py は旧バージョンです
 ```
 
 ## セットアップ
@@ -149,8 +147,3 @@ MIT License
 - **utils.py**: CSV操作、ログ設定などのユーティリティ
 - **progress_manager.py**: 進捗追跡と統計情報管理
 - **main.py**: メイン実行ロジック
-
-### 旧バージョンからの移行
-
-pharmacy_scraper_enhanced.py の機能は完全に新しい構成に移行されています。
-モジュール化により、保守性・拡張性が向上しました。
