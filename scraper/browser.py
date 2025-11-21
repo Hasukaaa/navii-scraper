@@ -28,7 +28,8 @@ def setup_browser():
     """
     playwright = sync_playwright().start()
 
-    # Chromiumブラウザを起動（コンテナ環境に最適化）
+    # Chromiumブラウザを起動（Docker環境で最適化）
+    # ローカル環境でクラッシュする場合はDockerでの実行を推奨
     browser = playwright.chromium.launch(
         headless=True,
         args=[
@@ -43,7 +44,8 @@ def setup_browser():
     # コンテキストとページを作成
     context = browser.new_context(
         user_agent=USER_AGENT,
-        viewport={'width': 1920, 'height': 1080}
+        viewport={'width': 1920, 'height': 1080},
+        ignore_https_errors=True  # SSL証明書エラーを無視
     )
 
     # タイムアウト設定
