@@ -9,9 +9,6 @@ import os
 import time
 import logging
 from datetime import datetime
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 from .config import (
     BASE_URL,
@@ -22,7 +19,7 @@ from .config import (
     LOG_FORMAT,
     WAIT_TIMEOUT
 )
-from .browser import setup_driver, setup_search_conditions
+from .browser import setup_browser, setup_search_conditions
 from .parser import (
     extract_prescription_count,
     extract_pharmacy_list,
@@ -42,12 +39,12 @@ from .progress_manager import ProgressManager, Statistics
 logger = None
 
 
-def scrape_prefecture(driver, pref_code, pref_name, progress_manager, statistics):
+def scrape_prefecture(page, pref_code, pref_name, progress_manager, statistics):
     """
     都道府県のデータを取得
 
     Args:
-        driver: Seleniumドライバー
+        page: Playwrightページオブジェクト
         pref_code (str): 都道府県コード
         pref_name (str): 都道府県名
         progress_manager (ProgressManager): 進捗管理オブジェクト
@@ -72,7 +69,7 @@ def scrape_prefecture(driver, pref_code, pref_name, progress_manager, statistics
         logger.info(f"{pref_name}: 既存データ {len(existing_ids)}件 (スキップします)")
 
     # 検索条件の設定
-    if not setup_search_conditions(driver, pref_code, pref_name, BASE_URL):
+    if not setup_search_conditions(page, pref_code, pref_name, BASE_URL):
         logger.error(f"{pref_name}: 検索条件の設定に失敗しました。スキップします。")
         return
 
@@ -84,14 +81,14 @@ def scrape_prefecture(driver, pref_code, pref_name, progress_manager, statistics
         logger.info(f"{pref_name}: ページ {page_num} 処理中...")
 
         # 薬局リストを取得
-        pharmacy_list = extract_pharmacy_list(driver)
+        pharmacy_list = extract_pharmacy_list(page)
 
         if not pharmacy_list:
             logger.warning(f"{pref_name}: データなし、または取得終了")
             break
 
         # 現在のURLを保存（詳細ページから戻るため）
-        current_list_url = driver.current_url
+        current_list_url = page.url
 
         # 各薬局の処理
         for pharmacy in pharmacy_list:
@@ -102,7 +99,7 @@ def scrape_prefecture(driver, pref_code, pref_name, progress_manager, statistics
 
             # 処方箋数を取得
             count = extract_prescription_count(
-                driver,
+                page,
                 pharmacy['url'],
                 pharmacy['id'],
                 pharmacy['name']
@@ -129,15 +126,15 @@ def scrape_prefecture(driver, pref_code, pref_name, progress_manager, statistics
             random_sleep()
 
         # リストページに戻る
-        driver.get(current_list_url)
+        page.goto(current_list_url, wait_until='networkidle')
+
         try:
-            WebDriverWait(driver, WAIT_TIMEOUT).until(
-                EC.presence_of_element_located((By.CLASS_NAME, "result-table"))
-            )
+            # 結果テーブルが表示されるまで待機
+            page.wait_for_selector('.result-table', timeout=WAIT_TIMEOUT * 1000)
 
             # 次ページへ
-            if has_next_page(driver):
-                go_to_next_page(driver)
+            if has_next_page(page):
+                go_to_next_page(page)
                 time.sleep(3)
                 page_num += 1
             else:
@@ -175,13 +172,13 @@ def main():
     completed, total, percentage = progress_manager.calculate_progress(len(PREFECTURES))
     logger.info(f"📊 進捗状況: {completed}/{total}都道府県完了 ({percentage:.1f}%)")
 
-    # Webドライバーの初期化
-    driver = setup_driver()
+    # Playwrightブラウザの初期化
+    playwright, browser, page = setup_browser()
 
     try:
         # 全都道府県を処理
         for code, name in PREFECTURES.items():
-            scrape_prefecture(driver, code, name, progress_manager, statistics)
+            scrape_prefecture(page, code, name, progress_manager, statistics)
 
             # 進捗表示
             completed, total, percentage = progress_manager.calculate_progress(len(PREFECTURES))
@@ -195,7 +192,8 @@ def main():
         logger.error(f"❌ エラー: {e}", exc_info=True)
         statistics.add_error()
     finally:
-        driver.quit()
+        browser.close()
+        playwright.stop()
         statistics.save()
         statistics.print_summary()
         logger.info("ブラウザを終了しました")

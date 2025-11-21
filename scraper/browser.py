@@ -2,25 +2,15 @@
 # -*- coding: utf-8 -*-
 """
 ブラウザ管理モジュール
-Seleniumドライバーの初期化と設定を管理
+Playwrightブラウザの初期化と設定を管理
 """
 
 import logging
 import time
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import (
-    TimeoutException,
-    StaleElementReferenceException
-)
-from webdriver_manager.chrome import ChromeDriverManager
+from playwright.sync_api import sync_playwright, Page, Browser, TimeoutError as PlaywrightTimeoutError
 
 from .config import (
     USER_AGENT,
-    WINDOW_SIZE,
     PAGE_LOAD_TIMEOUT,
     ELEMENT_TIMEOUT,
     MAX_RETRIES
@@ -29,54 +19,48 @@ from .config import (
 logger = logging.getLogger('PharmacyScraper')
 
 
-def setup_driver():
+def setup_browser():
     """
-    Webドライバーの初期化と設定
+    Playwrightブラウザの初期化と設定
 
     Returns:
-        webdriver.Chrome: 設定済みのChromeドライバー
+        tuple: (playwright, browser, page) のタプル
     """
-    options = webdriver.ChromeOptions()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--disable-extensions')
-    options.add_argument('--disable-setuid-sandbox')
-    options.add_argument('--single-process')
-    options.add_argument('--disable-web-security')
-    options.add_argument(f'--window-size={WINDOW_SIZE}')
-    options.add_argument(f'--user-agent={USER_AGENT}')
-    options.add_argument("--log-level=3")
+    playwright = sync_playwright().start()
 
-    # Chrome for Testingバイナリを使用
-    import os
-    chrome_binary = '/opt/chrome/chrome-linux64/chrome'
-    if os.path.exists(chrome_binary):
-        options.binary_location = chrome_binary
-        logger.info(f"Chromeバイナリを使用: {chrome_binary}")
+    # Chromiumブラウザを起動（コンテナ環境に最適化）
+    browser = playwright.chromium.launch(
+        headless=True,
+        args=[
+            '--no-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-setuid-sandbox',
+        ]
+    )
 
-    # 対応するChromedriverを使用
-    chromedriver_path = '/usr/local/bin/chromedriver'
-    if os.path.exists(chromedriver_path):
-        service = Service(chromedriver_path)
-        logger.info(f"Chromedriverを使用: {chromedriver_path}")
-    else:
-        service = Service(ChromeDriverManager().install())
+    # コンテキストとページを作成
+    context = browser.new_context(
+        user_agent=USER_AGENT,
+        viewport={'width': 1920, 'height': 1080}
+    )
 
-    driver = webdriver.Chrome(service=service, options=options)
-    driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
+    # タイムアウト設定
+    context.set_default_timeout(PAGE_LOAD_TIMEOUT * 1000)  # ミリ秒に変換
 
-    logger.info("Webドライバーを初期化しました")
-    return driver
+    page = context.new_page()
+
+    logger.info("Playwrightブラウザを初期化しました")
+    return playwright, browser, page
 
 
-def safe_set_value(driver, element_id, value):
+def safe_set_value(page: Page, element_id: str, value: str):
     """
     リトライ機能付きの要素値設定
 
     Args:
-        driver: Seleniumドライバー
+        page: Playwrightページオブジェクト
         element_id (str): 要素のID
         value (str): 設定する値
 
@@ -85,16 +69,17 @@ def safe_set_value(driver, element_id, value):
     """
     for i in range(MAX_RETRIES):
         try:
-            element = WebDriverWait(driver, ELEMENT_TIMEOUT).until(
-                EC.presence_of_element_located((By.ID, element_id))
-            )
-            driver.execute_script("""
-                arguments[0].value = arguments[1];
-                arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-                arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-            """, element, value)
+            # Playwrightは自動待機機能があるため、明示的な待機は不要
+            page.evaluate(f"""
+                const element = document.getElementById('{element_id}');
+                if (element) {{
+                    element.value = '{value}';
+                    element.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    element.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                }}
+            """)
             return True
-        except (StaleElementReferenceException, TimeoutException):
+        except PlaywrightTimeoutError:
             time.sleep(1)
             continue
         except Exception as e:
@@ -103,12 +88,12 @@ def safe_set_value(driver, element_id, value):
     return False
 
 
-def setup_search_conditions(driver, pref_code, pref_name, base_url):
+def setup_search_conditions(page: Page, pref_code: str, pref_name: str, base_url: str):
     """
     検索条件の設定
 
     Args:
-        driver: Seleniumドライバー
+        page: Playwrightページオブジェクト
         pref_code (str): 都道府県コード
         pref_name (str): 都道府県名
         base_url (str): ベースURL
@@ -118,31 +103,27 @@ def setup_search_conditions(driver, pref_code, pref_name, base_url):
     """
     for attempt in range(MAX_RETRIES):
         try:
-            driver.get(base_url)
-            WebDriverWait(driver, ELEMENT_TIMEOUT).until(
-                EC.presence_of_element_located((By.ID, "todofukenCd"))
-            )
+            # ページを開く
+            page.goto(base_url, wait_until='networkidle')
+
+            # 都道府県コードの要素が表示されるまで待機
+            page.wait_for_selector('#todofukenCd', timeout=ELEMENT_TIMEOUT * 1000)
 
             # 都道府県コードを設定
-            if not safe_set_value(driver, "todofukenCd", pref_code):
+            if not safe_set_value(page, "todofukenCd", pref_code):
                 raise Exception("都道府県セット失敗")
             time.sleep(1)
 
             # 医療機関種別を設定（5 = 薬局）
-            if not safe_set_value(driver, "iryoKikanShubetsuCd", "5"):
+            if not safe_set_value(page, "iryoKikanShubetsuCd", "5"):
                 raise Exception("医療機関種別セット失敗")
             time.sleep(1)
 
             # 検索ボタンをクリック
-            btn = WebDriverWait(driver, ELEMENT_TIMEOUT).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), '検索')]"))
-            )
-            driver.execute_script("arguments[0].click();", btn)
+            page.click("xpath=//button[contains(text(), '検索')]")
 
             # 結果が表示されるまで待機
-            WebDriverWait(driver, ELEMENT_TIMEOUT).until(
-                EC.presence_of_element_located((By.CLASS_NAME, "result-count"))
-            )
+            page.wait_for_selector('.result-count', timeout=ELEMENT_TIMEOUT * 1000)
 
             logger.info(f"{pref_name}: 検索条件設定成功")
             return True

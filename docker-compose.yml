@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  scraper:
+    build: .
+    container_name: navii-scraper
+    volumes:
+      # 出力ディレクトリをホストにマウント（データ永続化）
+      - ./outputs:/app/outputs
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

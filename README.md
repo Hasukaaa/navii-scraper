@@ -14,6 +14,8 @@
 - 詳細なロギング機能
 - 統計情報の出力
 - 実行時間の計測
+- Playwrightによる安定したブラウザ自動化
+- Dockerコンテナ環境対応
 
 ## プロジェクト構成
 
@@ -22,7 +24,7 @@ navii-scraper/
 ├── scraper/                    # メインパッケージ
 │   ├── __init__.py            # パッケージ初期化
 │   ├── main.py                # メイン実行フロー
-│   ├── browser.py             # Selenium初期化・操作
+│   ├── browser.py             # Playwright初期化・操作
 │   ├── parser.py              # データ抽出
 │   ├── utils.py               # ユーティリティ関数
 │   ├── progress_manager.py    # 進捗・統計管理
@@ -34,27 +36,35 @@ navii-scraper/
 │   └── scraper.log            # ログファイル
 ├── run.py                      # 実行エントリポイント
 ├── requirements.txt            # 依存パッケージ
-└── setup.sh                    # セットアップスクリプト
+├── Dockerfile                  # Docker設定
+├── docker-compose.yml          # Docker Compose設定
+└── .dockerignore               # Docker除外ファイル
 ```
 
 ## セットアップ
 
-### 1. リポジトリのクローン
+### 方法1: Docker（推奨）
+
+Dockerを使用すると、環境構築が不要で最も簡単に実行できます。
 
 ```bash
+# リポジトリのクローン
 git clone https://github.com/Hasukaaa/navii-scraper.git
 cd navii-scraper
+
+# Dockerイメージのビルドと実行
+docker-compose up --build
 ```
 
-### 2. 自動セットアップ（推奨）
+出力ファイルは `./outputs` ディレクトリに自動的に保存されます。
+
+### 方法2: ローカル環境（手動セットアップ）
 
 ```bash
-bash setup.sh
-```
+# リポジトリのクローン
+git clone https://github.com/Hasukaaa/navii-scraper.git
+cd navii-scraper
 
-### 3. 手動セットアップ
-
-```bash
 # 仮想環境の作成
 python3 -m venv venv
 
@@ -65,11 +75,27 @@ venv\Scripts\activate     # Windows
 
 # パッケージのインストール
 pip install -r requirements.txt
+
+# Playwrightブラウザのインストール
+playwright install chromium
 ```
 
 ## 使い方
 
-### 基本的な実行
+### Docker環境での実行
+
+```bash
+# バックグラウンドで実行
+docker-compose up -d
+
+# ログを確認
+docker-compose logs -f
+
+# 停止
+docker-compose down
+```
+
+### ローカル環境での実行
 
 ```bash
 # 仮想環境を有効化
@@ -82,7 +108,7 @@ python run.py
 ### 中断と再開
 
 - 実行中に `Ctrl+C` で中断可能
-- 再度 `python run.py` を実行すると、前回の続きから再開されます
+- 再度実行すると、前回の続きから再開されます
 - 進捗状況は `outputs/progress.json` に保存されます
 
 ## 出力データ
@@ -127,11 +153,17 @@ python run.py
 - 出力ディレクトリ
 - ログレベル
 
+## 技術スタック
+
+- **Python 3.x**: メインプログラミング言語
+- **Playwright**: ブラウザ自動化（Chromium使用）
+- **Docker**: コンテナ化による環境統一
+
 ## 注意事項
 
 - スクレイピング実行中はサーバーに負荷をかけないよう、適切な待機時間を設定しています
 - 実行には数時間かかる場合があります（全都道府県）
-- Chrome/Chromiumがインストールされている必要があります（webdriver-managerが自動管理）
+- Docker環境では、Playwright公式イメージを使用して安定動作を実現しています
 
 ## ライセンス
 
@@ -142,8 +174,15 @@ MIT License
 ### モジュール構成
 
 - **config.py**: 全設定値の一元管理
-- **browser.py**: Seleniumドライバーの初期化、検索条件設定
+- **browser.py**: Playwrightブラウザの初期化、検索条件設定
 - **parser.py**: Webページからのデータ抽出
 - **utils.py**: CSV操作、ログ設定などのユーティリティ
 - **progress_manager.py**: 進捗追跡と統計情報管理
 - **main.py**: メイン実行ロジック
+
+### 移行履歴
+
+- **v2.0**: SeleniumからPlaywrightへ移行
+  - コンテナ環境での安定性向上
+  - Chromeクラッシュ問題の解決
+  - よりシンプルで堅牢なAPI
