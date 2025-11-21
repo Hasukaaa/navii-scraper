@@ -9,6 +9,12 @@ import logging
 import time
 from playwright.sync_api import sync_playwright, Page, Browser, TimeoutError as PlaywrightTimeoutError
 
+try:
+    from playwright_stealth import stealth
+    STEALTH_AVAILABLE = True
+except ImportError:
+    STEALTH_AVAILABLE = False
+
 from .config import (
     USER_AGENT,
     PAGE_LOAD_TIMEOUT,
@@ -28,8 +34,7 @@ def setup_browser():
     """
     playwright = sync_playwright().start()
 
-    # Chromiumブラウザを起動（Docker環境で最適化）
-    # ローカル環境でクラッシュする場合はDockerでの実行を推奨
+    # Chromiumブラウザを起動（ボット検出回避のための設定）
     browser = playwright.chromium.launch(
         headless=True,
         args=[
@@ -38,14 +43,24 @@ def setup_browser():
             '--disable-gpu',
             '--disable-extensions',
             '--disable-setuid-sandbox',
+            '--disable-software-rasterizer',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--single-process',
+            '--disable-blink-features=AutomationControlled',  # WebDriverフラグを隠す
         ]
     )
 
-    # コンテキストとページを作成
+    # コンテキストとページを作成（より人間らしい設定）
     context = browser.new_context(
         user_agent=USER_AGENT,
         viewport={'width': 1920, 'height': 1080},
-        ignore_https_errors=True  # SSL証明書エラーを無視
+        ignore_https_errors=True,  # SSL証明書エラーを無視
+        locale='ja-JP',
+        timezone_id='Asia/Tokyo',
+        extra_http_headers={
+            'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
+        }
     )
 
     # タイムアウト設定
@@ -53,7 +68,38 @@ def setup_browser():
 
     page = context.new_page()
 
-    logger.info("Playwrightブラウザを初期化しました")
+    # WebDriver検出を回避するための追加設定
+    page.add_init_script("""
+        // WebDriverフラグを削除
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+        });
+
+        // Chrome検出をバイパス
+        window.chrome = {
+            runtime: {}
+        };
+
+        // Permissions APIのバイパス
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+            parameters.name === 'notifications' ?
+                Promise.resolve({ state: Notification.permission }) :
+                originalQuery(parameters)
+        );
+
+        // プラグイン配列の設定
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => [1, 2, 3, 4, 5]
+        });
+
+        // 言語設定
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['ja-JP', 'ja', 'en-US', 'en']
+        });
+    """)
+
+    logger.info("Playwrightブラウザを初期化しました（ボット検出回避設定有効）")
     return playwright, browser, page
 
 
@@ -106,7 +152,23 @@ def setup_search_conditions(page: Page, pref_code: str, pref_name: str, base_url
     for attempt in range(MAX_RETRIES):
         try:
             # ページを開く
-            page.goto(base_url, wait_until='networkidle')
+            logger.info(f"{pref_name}: ページを開いています: {base_url}")
+            page.goto(base_url, wait_until='domcontentloaded', timeout=30000)
+
+            # ページのスクリーンショットを撮る（デバッグ用）
+            screenshot_path = f"outputs/debug_{pref_code}_{attempt}.png"
+            page.screenshot(path=screenshot_path)
+            logger.info(f"{pref_name}: スクリーンショット保存: {screenshot_path}")
+
+            # ページのHTMLを確認（デバッグ用）
+            page_content = page.content()
+            if "todofukenCd" in page_content:
+                logger.info(f"{pref_name}: todofukenCd要素がHTMLに存在します")
+            else:
+                logger.warning(f"{pref_name}: todofukenCd要素がHTMLに見つかりません")
+
+            # 少し待機してJavaScriptが実行されるのを待つ
+            time.sleep(3)
 
             # 都道府県コードの要素が表示されるまで待機
             page.wait_for_selector('#todofukenCd', timeout=ELEMENT_TIMEOUT * 1000)
