@@ -235,8 +235,8 @@ def setup_search_conditions(page: Page, pref_code: str, pref_name: str, base_url
             # さらに待機してJavaScriptが実行されるのを待つ
             time.sleep(3)
 
-            # 都道府県コードの要素が表示されるまで待機
-            page.wait_for_selector('#todofukenCd', timeout=ELEMENT_TIMEOUT * 1000)
+            # 都道府県コードの要素がDOM上に存在するまで待機（hidden要素なので'attached'を使用）
+            page.wait_for_selector('#todofukenCd', state='attached', timeout=ELEMENT_TIMEOUT * 1000)
 
             # 都道府県コードを設定
             if not safe_set_value(page, "todofukenCd", pref_code):
