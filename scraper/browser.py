@@ -48,7 +48,13 @@ def setup_browser():
             '--disable-renderer-backgrounding',
             '--single-process',
             '--disable-blink-features=AutomationControlled',  # WebDriverフラグを隠す
-        ]
+            '--disable-features=IsolateOrigins,site-per-process',
+            '--disable-site-isolation-trials',
+            '--window-size=1920,1080',
+            '--start-maximized',
+        ],
+        # より自然なブラウザ環境
+        chromium_sandbox=False
     )
 
     # コンテキストとページを作成（より人間らしい設定）
@@ -59,7 +65,16 @@ def setup_browser():
         locale='ja-JP',
         timezone_id='Asia/Tokyo',
         extra_http_headers={
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
         }
     )
 
@@ -75,9 +90,17 @@ def setup_browser():
             get: () => undefined
         });
 
+        // automationフラグを削除
+        Object.defineProperty(navigator, 'automation', {
+            get: () => undefined
+        });
+
         // Chrome検出をバイパス
         window.chrome = {
-            runtime: {}
+            runtime: {},
+            loadTimes: function() {},
+            csi: function() {},
+            app: {}
         };
 
         // Permissions APIのバイパス
@@ -88,14 +111,53 @@ def setup_browser():
                 originalQuery(parameters)
         );
 
-        // プラグイン配列の設定
+        // プラグイン配列の設定（より現実的な値に）
         Object.defineProperty(navigator, 'plugins', {
-            get: () => [1, 2, 3, 4, 5]
+            get: () => [
+                {name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format'},
+                {name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: ''},
+                {name: 'Native Client', filename: 'internal-nacl-plugin', description: ''}
+            ]
         });
 
         // 言語設定
         Object.defineProperty(navigator, 'languages', {
             get: () => ['ja-JP', 'ja', 'en-US', 'en']
+        });
+
+        // Platform設定
+        Object.defineProperty(navigator, 'platform', {
+            get: () => 'Win32'
+        });
+
+        // vendor設定
+        Object.defineProperty(navigator, 'vendor', {
+            get: () => 'Google Inc.'
+        });
+
+        // maxTouchPoints設定
+        Object.defineProperty(navigator, 'maxTouchPoints', {
+            get: () => 0
+        });
+
+        // connection設定
+        Object.defineProperty(navigator, 'connection', {
+            get: () => ({
+                effectiveType: '4g',
+                rtt: 100,
+                downlink: 10,
+                saveData: false
+            })
+        });
+
+        // hardwareConcurrency設定
+        Object.defineProperty(navigator, 'hardwareConcurrency', {
+            get: () => 8
+        });
+
+        // deviceMemory設定
+        Object.defineProperty(navigator, 'deviceMemory', {
+            get: () => 8
         });
     """)
 
@@ -153,7 +215,10 @@ def setup_search_conditions(page: Page, pref_code: str, pref_name: str, base_url
         try:
             # ページを開く
             logger.info(f"{pref_name}: ページを開いています: {base_url}")
-            page.goto(base_url, wait_until='domcontentloaded', timeout=30000)
+            page.goto(base_url, wait_until='networkidle', timeout=30000)
+
+            # より長く待機してページが完全に読み込まれるのを待つ
+            time.sleep(5)
 
             # ページのスクリーンショットを撮る（デバッグ用）
             screenshot_path = f"outputs/debug_{pref_code}_{attempt}.png"
@@ -167,7 +232,7 @@ def setup_search_conditions(page: Page, pref_code: str, pref_name: str, base_url
             else:
                 logger.warning(f"{pref_name}: todofukenCd要素がHTMLに見つかりません")
 
-            # 少し待機してJavaScriptが実行されるのを待つ
+            # さらに待機してJavaScriptが実行されるのを待つ
             time.sleep(3)
 
             # 都道府県コードの要素が表示されるまで待機
@@ -194,7 +259,7 @@ def setup_search_conditions(page: Page, pref_code: str, pref_name: str, base_url
 
         except Exception as e:
             logger.warning(f"{pref_name}: 検索条件設定エラー (試行 {attempt+1}/{MAX_RETRIES}) - {e}")
-            time.sleep(3)
+            time.sleep(5)  # より長い待機時間でリトライ
 
     logger.error(f"{pref_name}: 検索条件設定に失敗しました")
     return False
