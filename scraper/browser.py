@@ -46,12 +46,29 @@ def setup_browser():
             '--disable-software-rasterizer',
             '--disable-backgrounding-occluded-windows',
             '--disable-renderer-backgrounding',
-            '--single-process',
+            # --single-process を削除（タブクラッシュの原因となる可能性あり）
             '--disable-blink-features=AutomationControlled',  # WebDriverフラグを隠す
             '--disable-features=IsolateOrigins,site-per-process',
             '--disable-site-isolation-trials',
             '--window-size=1920,1080',
             '--start-maximized',
+            # 追加のボット検出回避オプション
+            '--disable-web-security',
+            '--disable-features=site-per-process',
+            '--disable-hang-monitor',
+            '--disable-ipc-flooding-protection',
+            '--disable-prompt-on-repost',
+            '--disable-popup-blocking',
+            '--disable-default-apps',
+            '--disable-sync',
+            '--disable-translate',
+            '--metrics-recording-only',
+            '--mute-audio',
+            '--no-first-run',
+            '--safebrowsing-disable-auto-update',
+            '--enable-automation=false',
+            '--password-store=basic',
+            '--use-mock-keychain',
         ],
         # より自然なブラウザ環境
         chromium_sandbox=False
@@ -82,6 +99,14 @@ def setup_browser():
     context.set_default_timeout(PAGE_LOAD_TIMEOUT * 1000)  # ミリ秒に変換
 
     page = context.new_page()
+
+    # playwright-stealthを適用（利用可能な場合）
+    if STEALTH_AVAILABLE:
+        try:
+            stealth(page)
+            logger.info("playwright-stealthを適用しました")
+        except Exception as e:
+            logger.warning(f"playwright-stealth適用エラー: {e}")
 
     # WebDriver検出を回避するための追加設定
     page.add_init_script("""
@@ -215,10 +240,16 @@ def setup_search_conditions(page: Page, pref_code: str, pref_name: str, base_url
         try:
             # ページを開く
             logger.info(f"{pref_name}: ページを開いています: {base_url}")
-            page.goto(base_url, wait_until='networkidle', timeout=30000)
+            page.goto(base_url, wait_until='load', timeout=60000)
 
-            # より長く待機してページが完全に読み込まれるのを待つ
+            # ネットワークが安定するまで待機
             time.sleep(5)
+
+            # DOMContentLoadedを待つ
+            page.wait_for_load_state('domcontentloaded', timeout=30000)
+
+            # より長く待機してページが完全に読み込まれるのを待つ（JavaScriptの実行も含む）
+            time.sleep(8)
 
             # ページのスクリーンショットを撮る（デバッグ用）
             screenshot_path = f"outputs/debug_{pref_code}_{attempt}.png"
@@ -233,7 +264,7 @@ def setup_search_conditions(page: Page, pref_code: str, pref_name: str, base_url
                 logger.warning(f"{pref_name}: todofukenCd要素がHTMLに見つかりません")
 
             # さらに待機してJavaScriptが実行されるのを待つ
-            time.sleep(3)
+            time.sleep(5)
 
             # 都道府県コードの要素がDOM上に存在するまで待機（hidden要素なので'attached'を使用）
             page.wait_for_selector('#todofukenCd', state='attached', timeout=ELEMENT_TIMEOUT * 1000)
@@ -259,7 +290,10 @@ def setup_search_conditions(page: Page, pref_code: str, pref_name: str, base_url
 
         except Exception as e:
             logger.warning(f"{pref_name}: 検索条件設定エラー (試行 {attempt+1}/{MAX_RETRIES}) - {e}")
-            time.sleep(5)  # より長い待機時間でリトライ
+            # より長い待機時間でリトライ（指数バックオフ）
+            wait_time = 10 * (attempt + 1)
+            logger.info(f"{pref_name}: {wait_time}秒待機してからリトライします")
+            time.sleep(wait_time)
 
     logger.error(f"{pref_name}: 検索条件設定に失敗しました")
     return False
