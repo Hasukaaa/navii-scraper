@@ -215,30 +215,41 @@ def setup_search_conditions(page: Page, pref_code: str, pref_name: str, base_url
     """
     for attempt in range(MAX_RETRIES):
         try:
+            # リトライ時は新しいページを作成（クラッシュ後の状態をクリア）
+            if attempt > 0:
+                logger.info(f"{pref_name}: リトライ {attempt + 1}/{MAX_RETRIES} - 新しいページを作成")
+                try:
+                    page.close()
+                except:
+                    pass
+                page = page.context.new_page()
+
             # ページを開く（より軽量な読み込み方法）
             logger.info(f"{pref_name}: ページを開いています: {base_url}")
             page.goto(base_url, wait_until='domcontentloaded', timeout=60000)
 
             # JavaScriptが実行されるまで待機
-            time.sleep(10)
+            logger.info(f"{pref_name}: JavaScript実行を待機中（20秒）...")
+            time.sleep(20)
 
-            # ページのスクリーンショットを撮る（デバッグ用）- 一時的に無効化
-            # screenshot_path = f"outputs/debug_{pref_code}_{attempt}.png"
-            # page.screenshot(path=screenshot_path)
-            # logger.info(f"{pref_name}: スクリーンショット保存: {screenshot_path}")
+            # 都道府県コードの要素がDOM上に存在するか直接チェック（wait_for_selectorを避ける）
+            logger.info(f"{pref_name}: todofukenCd要素を確認中...")
+            found = False
+            for check_attempt in range(10):  # 最大10回、1秒ごとにチェック
+                element_exists = page.evaluate("""
+                    () => {
+                        const el = document.getElementById('todofukenCd');
+                        return el !== null;
+                    }
+                """)
+                if element_exists:
+                    logger.info(f"{pref_name}: todofukenCd要素が見つかりました")
+                    found = True
+                    break
+                time.sleep(1)
 
-            # ページのHTMLを確認（デバッグ用）
-            page_content = page.content()
-            if "todofukenCd" in page_content:
-                logger.info(f"{pref_name}: todofukenCd要素がHTMLに存在します")
-            else:
-                logger.warning(f"{pref_name}: todofukenCd要素がHTMLに見つかりません")
-
-            # さらに待機してJavaScriptが実行されるのを待つ
-            time.sleep(5)
-
-            # 都道府県コードの要素がDOM上に存在するまで待機（hidden要素なので'attached'を使用）
-            page.wait_for_selector('#todofukenCd', state='attached', timeout=ELEMENT_TIMEOUT * 1000)
+            if not found:
+                raise Exception("todofukenCd要素が見つかりませんでした")
 
             # 都道府県コードを設定
             if not safe_set_value(page, "todofukenCd", pref_code):
