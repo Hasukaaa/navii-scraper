@@ -10,10 +10,11 @@ import time
 from playwright.sync_api import sync_playwright, Page, Browser, TimeoutError as PlaywrightTimeoutError
 
 try:
-    from playwright_stealth import stealth
+    from playwright_stealth import stealth_sync
     STEALTH_AVAILABLE = True
 except ImportError:
     STEALTH_AVAILABLE = False
+    stealth_sync = None
 
 from .config import (
     USER_AGENT,
@@ -39,39 +40,15 @@ def setup_browser():
         headless=True,
         args=[
             '--no-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--disable-extensions',
             '--disable-setuid-sandbox',
-            '--disable-software-rasterizer',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding',
-            # --single-process を削除（タブクラッシュの原因となる可能性あり）
+            '--disable-dev-shm-usage',
             '--disable-blink-features=AutomationControlled',  # WebDriverフラグを隠す
-            '--disable-features=IsolateOrigins,site-per-process',
-            '--disable-site-isolation-trials',
             '--window-size=1920,1080',
-            '--start-maximized',
-            # 追加のボット検出回避オプション
-            '--disable-web-security',
-            '--disable-features=site-per-process',
-            '--disable-hang-monitor',
-            '--disable-ipc-flooding-protection',
-            '--disable-prompt-on-repost',
+            # 安定性のためのオプション
+            '--disable-extensions',
             '--disable-popup-blocking',
-            '--disable-default-apps',
-            '--disable-sync',
-            '--disable-translate',
-            '--metrics-recording-only',
-            '--mute-audio',
             '--no-first-run',
-            '--safebrowsing-disable-auto-update',
-            '--enable-automation=false',
-            '--password-store=basic',
-            '--use-mock-keychain',
-        ],
-        # より自然なブラウザ環境
-        chromium_sandbox=False
+        ]
     )
 
     # コンテキストとページを作成（より人間らしい設定）
@@ -100,13 +77,13 @@ def setup_browser():
 
     page = context.new_page()
 
-    # playwright-stealthを適用（利用可能な場合）
-    if STEALTH_AVAILABLE:
-        try:
-            stealth(page)
-            logger.info("playwright-stealthを適用しました")
-        except Exception as e:
-            logger.warning(f"playwright-stealth適用エラー: {e}")
+    # playwright-stealthを適用（利用可能な場合）- 一時的に無効化
+    # if STEALTH_AVAILABLE and stealth_sync:
+    #     try:
+    #         stealth_sync(page)
+    #         logger.info("playwright-stealthを適用しました")
+    #     except Exception as e:
+    #         logger.warning(f"playwright-stealth適用エラー: {e}")
 
     # WebDriver検出を回避するための追加設定
     page.add_init_script("""
@@ -238,23 +215,17 @@ def setup_search_conditions(page: Page, pref_code: str, pref_name: str, base_url
     """
     for attempt in range(MAX_RETRIES):
         try:
-            # ページを開く
+            # ページを開く（より軽量な読み込み方法）
             logger.info(f"{pref_name}: ページを開いています: {base_url}")
-            page.goto(base_url, wait_until='load', timeout=60000)
+            page.goto(base_url, wait_until='domcontentloaded', timeout=60000)
 
-            # ネットワークが安定するまで待機
-            time.sleep(5)
+            # JavaScriptが実行されるまで待機
+            time.sleep(10)
 
-            # DOMContentLoadedを待つ
-            page.wait_for_load_state('domcontentloaded', timeout=30000)
-
-            # より長く待機してページが完全に読み込まれるのを待つ（JavaScriptの実行も含む）
-            time.sleep(8)
-
-            # ページのスクリーンショットを撮る（デバッグ用）
-            screenshot_path = f"outputs/debug_{pref_code}_{attempt}.png"
-            page.screenshot(path=screenshot_path)
-            logger.info(f"{pref_name}: スクリーンショット保存: {screenshot_path}")
+            # ページのスクリーンショットを撮る（デバッグ用）- 一時的に無効化
+            # screenshot_path = f"outputs/debug_{pref_code}_{attempt}.png"
+            # page.screenshot(path=screenshot_path)
+            # logger.info(f"{pref_name}: スクリーンショット保存: {screenshot_path}")
 
             # ページのHTMLを確認（デバッグ用）
             page_content = page.content()

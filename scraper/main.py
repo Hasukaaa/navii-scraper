@@ -172,13 +172,26 @@ def main():
     completed, total, percentage = progress_manager.calculate_progress(len(PREFECTURES))
     logger.info(f"📊 進捗状況: {completed}/{total}都道府県完了 ({percentage:.1f}%)")
 
-    # Playwrightブラウザの初期化
-    playwright, browser, page = setup_browser()
-
     try:
-        # 全都道府県を処理
+        # 全都道府県を処理（各都道府県ごとにブラウザを再作成してクラッシュ対策）
         for code, name in PREFECTURES.items():
-            scrape_prefecture(page, code, name, progress_manager, statistics)
+            logger.info(f"{name}: 新しいブラウザインスタンスを起動します")
+
+            # 各都道府県ごとにブラウザを新規作成
+            playwright, browser, page = setup_browser()
+
+            try:
+                scrape_prefecture(page, code, name, progress_manager, statistics)
+            except Exception as e:
+                logger.error(f"{name}: エラーが発生しました - {e}", exc_info=True)
+                statistics.add_error()
+            finally:
+                # 都道府県ごとにブラウザをクリーンアップ
+                try:
+                    browser.close()
+                    playwright.stop()
+                except Exception as e:
+                    logger.warning(f"{name}: ブラウザクローズ時のエラー - {e}")
 
             # 進捗表示
             completed, total, percentage = progress_manager.calculate_progress(len(PREFECTURES))
@@ -192,11 +205,9 @@ def main():
         logger.error(f"❌ エラー: {e}", exc_info=True)
         statistics.add_error()
     finally:
-        browser.close()
-        playwright.stop()
         statistics.save()
         statistics.print_summary()
-        logger.info("ブラウザを終了しました")
+        logger.info("処理を終了しました")
 
 
 if __name__ == "__main__":
